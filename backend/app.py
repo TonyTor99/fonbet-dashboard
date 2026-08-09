@@ -7,10 +7,13 @@ FastAPI-слой панели fonbet-dashboard.
 Раздаёт собранный React (frontend/dist) как статику на "/".
 """
 import os
+import time
+import signal
+import asyncio
 import sqlite3
 import datetime
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -30,6 +33,34 @@ app.add_middleware(
 
 # Каталог боевых БД бота (задаётся на сервере). Локально пусто → refresh недоступен.
 LIVE_DB_DIR = os.environ.get("LIVE_DB_DIR", "")
+
+# Авто-стоп по простою: гасим панель через N минут без запросов (0 = выключено).
+# На сервере включается в systemd (PANEL_IDLE_STOP_MIN), локально по умолчанию выкл.
+IDLE_STOP_MIN = int(os.environ.get("PANEL_IDLE_STOP_MIN", "0"))
+_last_activity = time.time()
+
+
+@app.middleware("http")
+async def _track_activity(request: Request, call_next):
+    global _last_activity
+    _last_activity = time.time()
+    return await call_next(request)
+
+
+@app.on_event("startup")
+async def _idle_watchdog():
+    if IDLE_STOP_MIN <= 0:
+        return
+
+    async def _watch():
+        while True:
+            await asyncio.sleep(60)
+            if time.time() - _last_activity > IDLE_STOP_MIN * 60:
+                print(f"[idle] Простой >{IDLE_STOP_MIN} мин — останавливаю панель.")
+                os.kill(os.getpid(), signal.SIGTERM)
+                return
+
+    asyncio.create_task(_watch())
 
 
 @app.get("/api/sources")
