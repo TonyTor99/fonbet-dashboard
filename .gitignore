@@ -1,0 +1,14 @@
+venv/
+__pycache__/
+*.pyc
+frontend/node_modules/
+
+# Снимки БД — данные бота, наполняются кнопкой «Обновить» на сервере
+snapshots/*.db
+snapshots/*.db-wal
+snapshots/*.db-shm
+
+# История расчётов — локальная база, не в репозиторий
+history.db
+history.db-wal
+history.db-shm
