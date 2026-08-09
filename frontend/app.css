@@ -129,6 +129,8 @@ select.team-slot { width: 66px; flex-shrink: 0; padding: 6px 8px; font-size: 13p
 .team-list { margin-top: 6px; max-height: 200px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;
   background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
 .team-more { color: var(--muted); font-size: 11px; padding: 2px 0; }
+.pair-add { cursor: pointer; padding: 3px 4px; border-radius: 6px; }
+.pair-add:hover { background: var(--border); color: var(--accent); }
 th.sortable { cursor: pointer; user-select: none; }
 th.sortable:hover { color: var(--accent); }
 

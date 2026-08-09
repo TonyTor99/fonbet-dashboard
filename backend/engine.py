@@ -73,35 +73,69 @@ def source_meta(source_key):
             f"WHERE league IS NOT NULL GROUP BY league ORDER BY c DESC")]
         out["matches"] = con.execute(f"SELECT COUNT(DISTINCT event_id) FROM {table}").fetchone()[0]
         dr = con.execute(f"SELECT MIN(date(created_at)), MAX(date(created_at)) FROM {table}").fetchone()
+        # Доступные значения линий по каждой колонке рынка (для чекбоксов форы и
+        # подсказки диапазона тоталов/инд.тоталов).
+        line_cols = sorted({m["line"] for m in src["markets"] if m.get("line")})
+        out["line_values"] = {
+            col: [r[0] for r in con.execute(
+                f"SELECT DISTINCT {col} FROM {table} WHERE {col} IS NOT NULL ORDER BY {col}")]
+            for col in line_cols
+        }
     out["date_from"], out["date_to"] = dr[0], dr[1]
-    # Список команд (без повторов) для фильтра/поиска — объединение team1+team2
-    out["teams"] = [r[0] for r in con.execute(
-        f"SELECT DISTINCT t FROM (SELECT team1 t FROM {table} UNION "
-        f"SELECT team2 FROM {table}) WHERE t IS NOT NULL AND t <> '' ORDER BY 1")]
+    # Реальные пары (встречи), порядок команд не важен — для фильтра пар.
+    seen, pairs = set(), []
+    for a, b in con.execute(
+        f"SELECT DISTINCT team1, team2 FROM {table} "
+        f"WHERE team1 IS NOT NULL AND team1 <> '' AND team2 IS NOT NULL AND team2 <> ''"):
+        key = tuple(sorted([a, b]))
+        if key in seen:
+            continue
+        seen.add(key)
+        pairs.append([key[0], key[1]])
+    pairs.sort()
+    out["pairs"] = pairs
     con.close()
     return out
 
 
-# --- Фильтр по командам и статистика пар --------------------------------------
+# --- Фильтр по парам, времени и статистика пар --------------------------------
 
-def _team_where(teams):
-    """teams: [{name, slot}] где slot: '1' | '2' | 'any'. Возвращает (clause, args).
-    Несколько команд объединяются через OR (матч подходит под любую)."""
+def _pair_where(pairs):
+    """pairs: [[teamA, teamB], ...]. Матч подходит, если это ровно эта пара
+    (порядок команд не важен). Несколько пар объединяются через OR."""
     clauses, args = [], []
-    for t in teams or []:
-        name = (t or {}).get("name")
-        if not name:
+    for pr in pairs or []:
+        if not pr or len(pr) < 2:
             continue
-        slot = (t or {}).get("slot", "any")
-        if slot == "1":
-            clauses.append("team1 = ?"); args.append(name)
-        elif slot == "2":
-            clauses.append("team2 = ?"); args.append(name)
-        else:
-            clauses.append("(team1 = ? OR team2 = ?)"); args.extend([name, name])
+        a, b = pr[0], pr[1]
+        if not a or not b:
+            continue
+        clauses.append("((team1 = ? AND team2 = ?) OR (team1 = ? AND team2 = ?))")
+        args.extend([a, b, b, a])
     if not clauses:
         return None, []
     return "(%s)" % " OR ".join(clauses), args
+
+
+def _time_where(col, windows):
+    """windows: [["10:00","12:00"], ...] — время суток МСК. Ставка подходит, если
+    время суток снимка (`col` формата 'YYYY-MM-DD HH:MM:SS') попадает в любой
+    интервал. Поддержка окна через полночь (start > end)."""
+    parts, args = [], []
+    texpr = f"substr({col}, 12, 5)"   # 'HH:MM' из '....-.. HH:MM:SS'
+    for w in windows or []:
+        if not w or len(w) < 2:
+            continue
+        s, e = w[0], w[1]
+        if not s or not e:
+            continue
+        if s <= e:
+            parts.append(f"({texpr} >= ? AND {texpr} <= ?)"); args.extend([s, e])
+        else:
+            parts.append(f"({texpr} >= ? OR {texpr} <= ?)"); args.extend([s, e])
+    if not parts:
+        return None, []
+    return "(%s)" % " OR ".join(parts), args
 
 
 def _pair_stats(bets, stake):
@@ -152,6 +186,19 @@ def _collect_market_bets(source_key, p):
     if p.get("odds_max") is not None:
         where.append(f"{odds_col} <= ?"); args.append(float(p["odds_max"]))
 
+    # фильтр по линии (только если у рынка есть колонка линии):
+    #   форы — выбор конкретных значений (lines IN ...);
+    #   тоталы / инд.тоталы — диапазон line_min..line_max.
+    if line_col:
+        sel_lines = p.get("lines") or []
+        if sel_lines:
+            where.append(f"{line_col} IN (%s)" % ",".join("?" * len(sel_lines)))
+            args.extend(float(x) for x in sel_lines)
+        if p.get("line_min") is not None:
+            where.append(f"{line_col} >= ?"); args.append(float(p["line_min"]))
+        if p.get("line_max") is not None:
+            where.append(f"{line_col} <= ?"); args.append(float(p["line_max"]))
+
     # момент входа: предматч | определённая минута (точно) | перерыв перед периодом N.
     # Среди подходящих снимков берётся ПЕРВЫЙ по времени (см. ROW_NUMBER ниже),
     # поэтому для "break" первый снимок периода N = сразу после перерыва.
@@ -177,10 +224,15 @@ def _collect_market_bets(source_key, p):
     if p.get("date_to"):
         where.append("date(created_at) <= ?"); args.append(p["date_to"])
 
-    # команды
-    tw, ta = _team_where(p.get("teams"))
-    if tw:
-        where.append(tw); args.extend(ta)
+    # время суток снимка (несколько интервалов МСК) — по snap_dt_msk
+    tww, twa = _time_where("snap_dt_msk", p.get("time_windows"))
+    if tww:
+        where.append(tww); args.extend(twa)
+
+    # пары команд
+    pw, pa = _pair_where(p.get("pairs"))
+    if pw:
+        where.append(pw); args.extend(pa)
 
     meta = ", ".join(META_COLS)
     line_sel = f", {line_col} AS line_val" if line_col else ", NULL AS line_val"
@@ -256,10 +308,15 @@ def _collect_signal_bets(source_key, p):
     if p.get("date_to"):
         where.append("date(created_at) <= ?"); args.append(p["date_to"])
 
-    # команды
-    tw, ta = _team_where(p.get("teams"))
-    if tw:
-        where.append(tw); args.extend(ta)
+    # время суток (несколько интервалов МСК) — по created_at сигнала
+    tww, twa = _time_where("created_at", p.get("time_windows"))
+    if tww:
+        where.append(tww); args.extend(twa)
+
+    # пары команд
+    pw, pa = _pair_where(p.get("pairs"))
+    if pw:
+        where.append(pw); args.extend(pa)
 
     # Дедуп: один сигнал на матч (первый по времени среди подходящих).
     sql = f"""

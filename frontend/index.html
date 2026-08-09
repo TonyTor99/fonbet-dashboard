@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Fonbet Dashboard</title>
-  <link rel="stylesheet" href="/app.css?v=4" />
+  <link rel="stylesheet" href="/app.css?v=5" />
   <script src="/vendor/react.js"></script>
   <script src="/vendor/react-dom.js"></script>
   <script src="/vendor/chart.js"></script>
@@ -45,14 +45,32 @@ const clearHistoryReq = (src) => api('/api/history/' + src, { method: 'DELETE' }
 const DEFAULT_F = {
   market: '', entryKind: '', entryN: '',
   oddsMin: '', oddsMax: '',
+  lines: [], lineMin: '', lineMax: '',
   leagues: [], dateFrom: '', dateTo: '',
-  zapas: {}, teams: {},
+  timeWindows: '',
+  zapas: {}, pairs: [],
   stake: 1000, bank: 100000,
 };
 
 // Короткое имя лиги IPBL для подписей
 const shortLeague = (lg) => (lg || '')
   .replace('Россия. IPBL. ', '').replace('Шорт-хоккей. ', '');
+
+// Ключ пары (порядок команд из бэкенда уже нормализован)
+const pairKey = (p) => p[0] + ' ||| ' + p[1];
+const fmtLineVal = (v) => (v > 0 ? '+' + v : '' + v);
+
+// '10:00-12:00, 16:00-18:00' -> [['10:00','12:00'], ['16:00','18:00']]
+const padHM = (t) => { const [h, m] = t.split(':'); return h.padStart(2, '0') + ':' + m; };
+function parseWindows(str) {
+  if (!str) return [];
+  return str.split(',').map((s) => s.trim()).filter(Boolean).map((part) => {
+    const seg = part.split('-').map((x) => x.trim());
+    if (seg.length === 2 && /^\d{1,2}:\d{2}$/.test(seg[0]) && /^\d{1,2}:\d{2}$/.test(seg[1]))
+      return [padHM(seg[0]), padHM(seg[1])];
+    return null;
+  }).filter(Boolean);
+}
 
 // --- График прибыли на Chart.js ---
 function ProfitChart({ curve }) {
@@ -198,45 +216,74 @@ function Results({ result }) {
   );
 }
 
-// --- Фильтр по командам: поиск + чекбоксы + слот 1/2/люб. ---
-function TeamFilter({ teams, selected, onToggle, onSlot }) {
+// --- Фильтр по линии: форы — чекбоксы значений; тоталы/инд.тоталы — диапазон ---
+function LineFilter({ market, values, f, upd, toggleArr }) {
+  if (!market || !market.line) return null;
+  const vals = values || [];
+  if (market.group === 'Фора') {
+    return (
+      <div className="fld"><span>Значения форы ({f.lines.length ? f.lines.length : 'все'})</span>
+        <div className="checks">
+          {vals.map((v) => (
+            <label key={v} className="check">
+              <input type="checkbox" checked={f.lines.includes(v)} onChange={() => toggleArr('lines', v)} />
+              {fmtLineVal(v)}
+            </label>
+          ))}
+          {!vals.length && <div className="team-more">нет значений</div>}
+        </div>
+      </div>
+    );
+  }
+  // Тотал / инд. тотал — диапазон от/до (подсказка — доступный диапазон)
+  const lo = vals.length ? vals[0] : '';
+  const hi = vals.length ? vals[vals.length - 1] : '';
+  return (
+    <div className="fld row">
+      <label><span>Линия от</span><input type="number" step="0.5" placeholder={'' + lo}
+        value={f.lineMin} onChange={(e) => upd('lineMin', e.target.value)} /></label>
+      <label><span>Линия до</span><input type="number" step="0.5" placeholder={'' + hi}
+        value={f.lineMax} onChange={(e) => upd('lineMax', e.target.value)} /></label>
+    </div>
+  );
+}
+
+// --- Фильтр по парам: поиск + список реальных встреч, выбранные — чипами сверху ---
+function PairFilter({ pairs, selected, onAdd, onRemove }) {
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
-  const names = Object.keys(selected);
+  const selKeys = new Set(selected.map(pairKey));
   const ql = q.trim().toLowerCase();
-  const list = ql ? teams.filter((t) => t.toLowerCase().includes(ql)) : teams;
+  const avail = pairs.filter((p) => !selKeys.has(pairKey(p)));
+  const list = ql ? avail.filter((p) => (p[0] + ' ' + p[1]).toLowerCase().includes(ql)) : avail;
   return (
     <div className="fld">
       <span className="collapse-head" onClick={() => setOpen((v) => !v)}>
         <span className="chevron">{open ? '▾' : '▸'}</span>
-        Команды ({names.length ? names.length : 'все'})
+        Пары ({selected.length ? selected.length : 'все'})
       </span>
-      {names.length > 0 && (
+      {selected.length > 0 && (
         <div className="team-selected">
-          {names.map((n) => (
-            <div key={n} className="team-sel-row">
-              <span className="team-name" title={n}>{n}</span>
-              <select className="team-slot" value={selected[n]} onChange={(e) => onSlot(n, e.target.value)}>
-                <option value="any">люб.</option>
-                <option value="1">1</option>
-                <option value="2">2</option>
-              </select>
-              <button type="button" className="team-x" title="убрать" onClick={() => onToggle(n)}>×</button>
+          {selected.map((p) => (
+            <div key={pairKey(p)} className="team-sel-row">
+              <span className="team-name" title={p[0] + ' — ' + p[1]}>{p[0]} — {p[1]}</span>
+              <button type="button" className="team-x" title="убрать" onClick={() => onRemove(p)}>×</button>
             </div>
           ))}
         </div>
       )}
       {open && (
         <React.Fragment>
-          <input className="team-search" placeholder="поиск команды…" value={q} onChange={(e) => setQ(e.target.value)} />
+          <input className="team-search" placeholder="поиск пары…" value={q} onChange={(e) => setQ(e.target.value)} />
           <div className="team-list">
-            {list.slice(0, 80).map((t) => (
-              <label key={t} className="check">
-                <input type="checkbox" checked={t in selected} onChange={() => onToggle(t)} />{t}
-              </label>
+            {list.slice(0, 80).map((p) => (
+              <div key={pairKey(p)} className="check pair-add"
+                   onClick={() => { onAdd(p); setQ(''); }}>
+                + {p[0]} — {p[1]}
+              </div>
             ))}
             {list.length > 80 && <div className="team-more">…ещё {list.length - 80}, уточни поиск</div>}
-            {!list.length && <div className="team-more">ничего не найдено</div>}
+            {!list.length && <div className="team-more">{avail.length ? 'ничего не найдено' : 'все пары выбраны'}</div>}
           </div>
         </React.Fragment>
       )}
@@ -328,12 +375,11 @@ function App() {
     ...p, [k]: p[k].includes(v) ? p[k].filter((x) => x !== v) : [...p[k], v],
   }));
   const num = (v) => (v === '' || v === null ? null : Number(v));
-  const toggleTeam = (name) => setF((p) => {
-    const t = { ...p.teams };
-    if (name in t) delete t[name]; else t[name] = 'any';
-    return { ...p, teams: t };
-  });
-  const setTeamSlot = (name, slot) => setF((p) => ({ ...p, teams: { ...p.teams, [name]: slot } }));
+  const addPair = (pr) => setF((p) =>
+    p.pairs.some((x) => pairKey(x) === pairKey(pr)) ? p : { ...p, pairs: [...p.pairs, pr] });
+  const removePair = (pr) => setF((p) => ({ ...p, pairs: p.pairs.filter((x) => pairKey(x) !== pairKey(pr)) }));
+  // Смена рынка сбрасывает фильтры линии (у разных рынков разные значения)
+  const changeMarket = (code) => setF((p) => ({ ...p, market: code, lines: [], lineMin: '', lineMax: '' }));
 
   async function calc() {
     setLoading(true); setError(''); setResult(null);
@@ -342,7 +388,8 @@ function App() {
         source: sourceKey,
         odds_min: num(f.oddsMin), odds_max: num(f.oddsMax),
         leagues: f.leagues, date_from: f.dateFrom || null, date_to: f.dateTo || null,
-        teams: Object.entries(f.teams).map(([name, slot]) => ({ name, slot })),
+        time_windows: parseWindows(f.timeWindows),
+        pairs: f.pairs,
         stake: num(f.stake) || 1000, bank: num(f.bank) || 100000,
       };
       let params;
@@ -350,7 +397,8 @@ function App() {
         params = { ...base, zapas: f.zapas };
       } else {
         params = { ...base, market: f.market,
-          entry: { kind: f.entryKind, n: f.entryN === '' ? null : Number(f.entryN) } };
+          entry: { kind: f.entryKind, n: f.entryN === '' ? null : Number(f.entryN) },
+          lines: f.lines, line_min: num(f.lineMin), line_max: num(f.lineMax) };
       }
       const res = await runBacktest(params);
       setResult(res);
@@ -383,7 +431,7 @@ function App() {
 
   // Восстановить параметры расчёта из истории и показать результат
   async function restoreHistory(entry) {
-    setF(entry.form);
+    setF({ ...DEFAULT_F, ...entry.form });
     setLoading(true); setError(''); setResult(null);
     try { setResult(await runBacktest(entry.params)); }
     catch (e) { setError(e.message); }
@@ -400,6 +448,8 @@ function App() {
   }
 
   const curEntry = meta && meta.entry_points ? meta.entry_points.find((e) => e.kind === f.entryKind) : null;
+  const curMarket = meta && meta.markets ? meta.markets.find((m) => m.code === f.market) : null;
+  const curLineVals = curMarket && meta.line_values ? meta.line_values[curMarket.line] : null;
 
   return (
     <div className="app">
@@ -430,10 +480,11 @@ function App() {
           {meta && meta.kind !== 'signals' && (
             <React.Fragment>
               <label className="fld"><span>Рынок / исход</span>
-                <select value={f.market} onChange={(e) => upd('market', e.target.value)}>
+                <select value={f.market} onChange={(e) => changeMarket(e.target.value)}>
                   {meta.markets.map((m) => <option key={m.code} value={m.code}>{m.group} — {m.label}</option>)}
                 </select>
               </label>
+              <LineFilter market={curMarket} values={curLineVals} f={f} upd={upd} toggleArr={toggleArr} />
               <div className="fld"><span>Момент входа</span>
                 {meta.entry_points.map((ep) => (
                   <label key={ep.kind} className="radio">
@@ -496,14 +547,18 @@ function App() {
             </React.Fragment>
           )}
 
-          {meta && meta.teams && meta.teams.length > 0 && (
-            <TeamFilter teams={meta.teams} selected={f.teams} onToggle={toggleTeam} onSlot={setTeamSlot} />
+          {meta && meta.pairs && meta.pairs.length > 0 && (
+            <PairFilter pairs={meta.pairs} selected={f.pairs} onAdd={addPair} onRemove={removePair} />
           )}
 
           <div className="fld row">
             <label><span>Дата от</span><input type="date" value={f.dateFrom} onChange={(e) => upd('dateFrom', e.target.value)} /></label>
             <label><span>Дата до</span><input type="date" value={f.dateTo} onChange={(e) => upd('dateTo', e.target.value)} /></label>
           </div>
+          <label className="fld"><span>Время суток МСК (интервалы)</span>
+            <input type="text" placeholder="10:00-12:00, 16:00-18:00"
+              value={f.timeWindows} onChange={(e) => upd('timeWindows', e.target.value)} />
+          </label>
           <div className="fld row">
             <label><span>Ставка</span><input type="number" value={f.stake} onChange={(e) => upd('stake', e.target.value)} /></label>
             <label><span>Банк</span><input type="number" value={f.bank} onChange={(e) => upd('bank', e.target.value)} /></label>
