@@ -138,6 +138,23 @@ def _time_where(col, windows):
     return "(%s)" % " OR ".join(parts), args
 
 
+def _weekday_where(col, weekdays):
+    """weekdays: список индексов дней недели [0..6], где 0=Пн … 6=Вс (как в
+    WEEKDAYS_RU и графике «по дням недели»). Ставка подходит, если день недели
+    даты `col` входит в набор. Пустой/None = без фильтра (все дни).
+    SQLite strftime('%w') даёт 0=Вс … 6=Сб, поэтому маппим (i+1) % 7."""
+    days = []
+    for i in weekdays or []:
+        try:
+            days.append(str((int(i) + 1) % 7))
+        except (TypeError, ValueError):
+            continue
+    if not days:
+        return None, []
+    placeholders = ",".join("?" * len(days))
+    return f"strftime('%w', {col}) IN ({placeholders})", days
+
+
 def _pair_stats(bets, stake):
     """Агрегат по парам без учёта стороны (Баракуды–Скорпионы = одна пара)."""
     agg = {}
@@ -229,6 +246,11 @@ def _collect_market_bets(source_key, p):
     if tww:
         where.append(tww); args.extend(twa)
 
+    # дни недели (чекбоксы) — по дате снимка created_at
+    dww, dwa = _weekday_where("created_at", p.get("weekdays"))
+    if dww:
+        where.append(dww); args.extend(dwa)
+
     # пары команд
     pw, pa = _pair_where(p.get("pairs"))
     if pw:
@@ -312,6 +334,11 @@ def _collect_signal_bets(source_key, p):
     tww, twa = _time_where("created_at", p.get("time_windows"))
     if tww:
         where.append(tww); args.extend(twa)
+
+    # дни недели (чекбоксы) — по дате сигнала created_at
+    dww, dwa = _weekday_where("created_at", p.get("weekdays"))
+    if dww:
+        where.append(dww); args.extend(dwa)
 
     # пары команд
     pw, pa = _pair_where(p.get("pairs"))

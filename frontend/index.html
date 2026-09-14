@@ -50,10 +50,13 @@ const DEFAULT_F = {
   oddsMin: '', oddsMax: '',
   lines: [], lineMin: '', lineMax: '',
   leagues: [], dateFrom: '', dateTo: '',
-  timeWindows: '',
+  timeWindows: '', weekdays: [],
   zapas: {}, pairs: [],
   stake: 1000, bank: 100000,
 };
+
+// Дни недели для чекбоксов (индекс 0=Пн … 6=Вс, совпадает с бэкендом)
+const WEEKDAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 
 // Короткое имя лиги IPBL для подписей
 const shortLeague = (lg) => (lg || '')
@@ -398,6 +401,7 @@ function App() {
         odds_min: num(f.oddsMin), odds_max: num(f.oddsMax),
         leagues: f.leagues, date_from: f.dateFrom || null, date_to: f.dateTo || null,
         time_windows: parseWindows(f.timeWindows),
+        weekdays: f.weekdays,
         pairs: f.pairs,
         stake: num(f.stake) || 1000, bank: num(f.bank) || 100000,
       };
@@ -576,6 +580,16 @@ function App() {
             <input type="text" placeholder="10:00-12:00, 16:00-18:00"
               value={f.timeWindows} onChange={(e) => upd('timeWindows', e.target.value)} />
           </label>
+          <div className="fld"><span>Дни недели ({f.weekdays.length ? f.weekdays.length : 'все'})</span>
+            <div className="checks">
+              {WEEKDAYS.map((d, i) => (
+                <label key={i} className="check">
+                  <input type="checkbox" checked={f.weekdays.includes(i)} onChange={() => toggleArr('weekdays', i)} />
+                  {d}
+                </label>
+              ))}
+            </div>
+          </div>
           <div className="fld row">
             <label><span>Ставка</span><input type="number" value={f.stake} onChange={(e) => upd('stake', e.target.value)} /></label>
             <label><span>Банк</span><input type="number" value={f.bank} onChange={(e) => upd('bank', e.target.value)} /></label>
