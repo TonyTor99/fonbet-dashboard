@@ -95,6 +95,14 @@ def hist_add(source: str, payload: dict):
                        payload.get("summary"))
 
 
+@app.post("/api/history/{source}/{entry_id}/favorite")
+def hist_favorite(source: str, entry_id: int, payload: dict):
+    entry = history.set_favorite(source, entry_id, bool(payload.get("favorite")))
+    if entry is None:
+        raise HTTPException(404, "Запись не найдена")
+    return entry
+
+
 @app.delete("/api/history/{source}/{entry_id}")
 def hist_delete(source: str, entry_id: int):
     history.delete(source, entry_id)

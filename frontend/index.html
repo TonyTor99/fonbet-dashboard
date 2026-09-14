@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Fonbet Dashboard</title>
-  <link rel="stylesheet" href="/app.css?v=5" />
+  <link rel="stylesheet" href="/app.css?v=6" />
   <script src="/vendor/react.js"></script>
   <script src="/vendor/react-dom.js"></script>
   <script src="/vendor/chart.js"></script>
@@ -41,6 +41,9 @@ const postHistory = (src, payload) => api('/api/history/' + src, {
 });
 const delHistory = (src, id) => api('/api/history/' + src + '/' + id, { method: 'DELETE' });
 const clearHistoryReq = (src) => api('/api/history/' + src, { method: 'DELETE' });
+const favHistoryReq = (src, id, favorite) => api('/api/history/' + src + '/' + id + '/favorite', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ favorite }),
+});
 
 const DEFAULT_F = {
   market: '', entryKind: '', entryN: '',
@@ -112,23 +115,29 @@ function BarChart({ data, labelKey, height }) {
     if (!ref.current) return;
     if (chart.current) chart.current.destroy();
     const vals = data.map((p) => p.profit);
+    const counts = data.map((p) => p.matches);
+    const hasCounts = counts.some((c) => c !== undefined && c !== null);
+    const datasets = [{
+      type: 'bar', label: 'Прибыль', data: vals, yAxisID: 'y', order: 2,
+      backgroundColor: vals.map((v) => v >= 0 ? 'rgba(74,222,128,0.55)' : 'rgba(248,113,113,0.55)'),
+      borderColor: vals.map((v) => v >= 0 ? '#4ade80' : '#f87171'),
+      borderWidth: 1,
+    }];
+    if (hasCounts) datasets.push({
+      type: 'line', label: 'Матчей', data: counts, yAxisID: 'y1', order: 1,
+      borderColor: '#60a5fa', backgroundColor: 'transparent',
+      borderWidth: 2, pointRadius: 2, pointBackgroundColor: '#60a5fa', tension: 0.15,
+    });
     chart.current = new Chart(ref.current, {
-      type: 'bar',
-      data: {
-        labels: data.map((p) => p[labelKey]),
-        datasets: [{
-          data: vals,
-          backgroundColor: vals.map((v) => v >= 0 ? 'rgba(74,222,128,0.55)' : 'rgba(248,113,113,0.55)'),
-          borderColor: vals.map((v) => v >= 0 ? '#4ade80' : '#f87171'),
-          borderWidth: 1,
-        }],
-      },
+      data: { labels: data.map((p) => p[labelKey]), datasets },
       options: {
         responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
+        plugins: { legend: { display: hasCounts, labels: { color: '#8b95a7', boxWidth: 12 } } },
         scales: {
           x: { ticks: { color: '#8b95a7', maxTicksLimit: 16 }, grid: { color: '#2a3142' } },
-          y: { ticks: { color: '#8b95a7', callback: (v) => fmt(v) }, grid: { color: '#2a3142' } },
+          y: { position: 'left', ticks: { color: '#8b95a7', callback: (v) => fmt(v) }, grid: { color: '#2a3142' } },
+          y1: { position: 'right', display: hasCounts, beginAtZero: true,
+                ticks: { color: '#60a5fa', precision: 0 }, grid: { drawOnChartArea: false } },
         },
       },
     });
@@ -425,6 +434,14 @@ function App() {
     catch (e) {}
   }
 
+  async function toggleFavorite(entry) {
+    const val = !entry.favorite;
+    try {
+      const upd = await favHistoryReq(sourceKey, entry.id, val);
+      setHistory((arr) => arr.map((e) => e.id === upd.id ? upd : e));
+    } catch (e) {}
+  }
+
   async function clearHistory() {
     try { await clearHistoryReq(sourceKey); setHistory([]); } catch (e) {}
   }
@@ -577,8 +594,11 @@ function App() {
               </span>
               {histOpen && (
                 <div className="hist-list">
-                  {history.map((e) => (
-                    <div key={e.id} className="hist-row">
+                  {history.slice().sort((a, b) => (b.favorite ? 1 : 0) - (a.favorite ? 1 : 0)).map((e) => (
+                    <div key={e.id} className={'hist-row' + (e.favorite ? ' hist-fav' : '')}>
+                      <button type="button" className={'hist-star' + (e.favorite ? ' on' : '')}
+                              title={e.favorite ? 'Убрать из избранного' : 'В избранное'}
+                              onClick={() => toggleFavorite(e)}>{e.favorite ? '★' : '☆'}</button>
                       <div className="hist-main" onClick={() => restoreHistory(e)} title="Показать этот расчёт">
                         <div className="hist-ts">{e.ts}</div>
                         <div className="hist-sum">
@@ -591,7 +611,7 @@ function App() {
                       <button type="button" className="team-x" title="удалить" onClick={() => deleteHistory(e.id)}>×</button>
                     </div>
                   ))}
-                  <div className="hist-clear" onClick={clearHistory}>Очистить историю</div>
+                  <div className="hist-clear" onClick={clearHistory}>Очистить историю (избранное останется)</div>
                 </div>
               )}
             </div>

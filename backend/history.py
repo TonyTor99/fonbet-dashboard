@@ -30,10 +30,15 @@ def init_db():
             form       TEXT NOT NULL,
             params     TEXT NOT NULL,
             summary    TEXT NOT NULL,
+            favorite   INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL
         )
     """)
     con.execute("CREATE INDEX IF NOT EXISTS idx_history_source ON history(source)")
+    # миграция старой БД без колонки favorite
+    cols = [r["name"] for r in con.execute("PRAGMA table_info(history)").fetchall()]
+    if "favorite" not in cols:
+        con.execute("ALTER TABLE history ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0")
     con.commit()
     con.close()
 
@@ -41,6 +46,7 @@ def init_db():
 def _row_to_entry(r):
     return {
         "id": r["id"], "ts": r["ts"],
+        "favorite": bool(r["favorite"]),
         "form": json.loads(r["form"]),
         "params": json.loads(r["params"]),
         "summary": json.loads(r["summary"]),
@@ -59,10 +65,11 @@ def add(source, form, params, summary):
          json.dumps(params, ensure_ascii=False),
          json.dumps(summary, ensure_ascii=False), now))
     rid = cur.lastrowid
-    # держим не более MAX_PER_SOURCE последних записей на источник
+    # держим не более MAX_PER_SOURCE последних НЕ-избранных записей на источник;
+    # избранные (favorite=1) не удаляются авто-очисткой никогда.
     con.execute(
-        "DELETE FROM history WHERE source=? AND id NOT IN "
-        "(SELECT id FROM history WHERE source=? ORDER BY id DESC LIMIT ?)",
+        "DELETE FROM history WHERE source=? AND favorite=0 AND id NOT IN "
+        "(SELECT id FROM history WHERE source=? AND favorite=0 ORDER BY id DESC LIMIT ?)",
         (source, source, MAX_PER_SOURCE))
     con.commit()
     row = con.execute("SELECT * FROM history WHERE id=?", (rid,)).fetchone()
@@ -78,6 +85,18 @@ def list_entries(source):
     return [_row_to_entry(r) for r in rows]
 
 
+def set_favorite(source, entry_id, favorite):
+    """Отметить/снять запись как избранную. Возвращает обновлённую запись или None."""
+    con = _con()
+    con.execute("UPDATE history SET favorite=? WHERE source=? AND id=?",
+                (1 if favorite else 0, source, entry_id))
+    con.commit()
+    row = con.execute("SELECT * FROM history WHERE source=? AND id=?",
+                      (source, entry_id)).fetchone()
+    con.close()
+    return _row_to_entry(row) if row else None
+
+
 def delete(source, entry_id):
     con = _con()
     con.execute("DELETE FROM history WHERE source=? AND id=?", (source, entry_id))
@@ -86,7 +105,8 @@ def delete(source, entry_id):
 
 
 def clear(source):
+    """Очистка истории источника. Избранные записи (favorite=1) сохраняются."""
     con = _con()
-    con.execute("DELETE FROM history WHERE source=?", (source,))
+    con.execute("DELETE FROM history WHERE source=? AND favorite=0", (source,))
     con.commit()
     con.close()

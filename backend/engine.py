@@ -370,9 +370,11 @@ def _metrics(bets, stake, bank):
     lose_streak = win_streak = 0
     max_lose_streak = max_win_streak = 0
     curve = []
-    daily = {}          # день -> кумулятивная эквити (последнее за день)
-    daily_profit = {}   # день -> суммарный профит за день
-    weekday = [0.0] * 7  # профит по дням недели (Пн..Вс)
+    daily = {}            # день -> кумулятивная эквити (последнее за день)
+    daily_profit = {}     # день -> суммарный профит за день
+    daily_matches = {}    # день -> множество event_id (кол-во матчей за день)
+    weekday = [0.0] * 7   # профит по дням недели (Пн..Вс)
+    weekday_matches = [set() for _ in range(7)]  # матчи по дням недели
     for b in bets:
         cum += b["profit"]
         peak = max(peak, cum)
@@ -386,9 +388,12 @@ def _metrics(bets, stake, bank):
         day = (b["date"] or "")[:10]
         daily[day] = cum
         daily_profit[day] = daily_profit.get(day, 0.0) + b["profit"]
+        daily_matches.setdefault(day, set()).add(b["event_id"])
         if day:
             try:
-                weekday[datetime.date.fromisoformat(day).weekday()] += b["profit"]
+                wd = datetime.date.fromisoformat(day).weekday()
+                weekday[wd] += b["profit"]
+                weekday_matches[wd].add(b["event_id"])
             except ValueError:
                 pass
 
@@ -396,8 +401,10 @@ def _metrics(bets, stake, bank):
         curve.append({"date": day, "cum_profit": round(daily[day], 2),
                       "cum_profit_pct": round(daily[day] / bank * 100, 3) if bank else 0})
 
-    daily_list = [{"date": d, "profit": round(daily_profit[d], 2)} for d in sorted(daily_profit)]
-    weekday_list = [{"day": WEEKDAYS_RU[i], "profit": round(weekday[i], 2)} for i in range(7)]
+    daily_list = [{"date": d, "profit": round(daily_profit[d], 2),
+                   "matches": len(daily_matches[d])} for d in sorted(daily_profit)]
+    weekday_list = [{"day": WEEKDAYS_RU[i], "profit": round(weekday[i], 2),
+                     "matches": len(weekday_matches[i])} for i in range(7)]
 
     # просадка в днях (по дневной кривой эквити): длина периода ниже прошлого пика
     days_sorted = sorted(daily)
