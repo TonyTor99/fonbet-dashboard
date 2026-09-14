@@ -402,6 +402,8 @@ def _metrics(bets, stake, bank):
     daily_matches = {}    # день -> множество event_id (кол-во матчей за день)
     weekday = [0.0] * 7   # профит по дням недели (Пн..Вс)
     weekday_matches = [set() for _ in range(7)]  # матчи по дням недели
+    hourly = [0.0] * 24   # профит по часам суток МСК (0..23)
+    hourly_matches = [set() for _ in range(24)]  # матчи по часам
     for b in bets:
         cum += b["profit"]
         peak = max(peak, cum)
@@ -423,6 +425,12 @@ def _metrics(bets, stake, bank):
                 weekday_matches[wd].add(b["event_id"])
             except ValueError:
                 pass
+        hh = (b["date"] or "")[11:13]   # час МСК из 'YYYY-MM-DD HH:MM:SS'
+        if hh.isdigit():
+            h = int(hh)
+            if 0 <= h < 24:
+                hourly[h] += b["profit"]
+                hourly_matches[h].add(b["event_id"])
 
     for day in sorted(daily):
         curve.append({"date": day, "cum_profit": round(daily[day], 2),
@@ -432,6 +440,8 @@ def _metrics(bets, stake, bank):
                    "matches": len(daily_matches[d])} for d in sorted(daily_profit)]
     weekday_list = [{"day": WEEKDAYS_RU[i], "profit": round(weekday[i], 2),
                      "matches": len(weekday_matches[i])} for i in range(7)]
+    hourly_list = [{"hour": str(h), "profit": round(hourly[h], 2),
+                    "matches": len(hourly_matches[h])} for h in range(24)]
 
     # просадка в днях (по дневной кривой эквити): длина периода ниже прошлого пика
     days_sorted = sorted(daily)
@@ -470,6 +480,7 @@ def _metrics(bets, stake, bank):
         "curve": curve,
         "daily_profit": daily_list,
         "weekday_profit": weekday_list,
+        "hourly_profit": hourly_list,
     }
 
 
