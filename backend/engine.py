@@ -213,9 +213,12 @@ def _collect_tl_bets(source_key, p, m):
     """Ставки для рынков CAGE из дочерней таблицы total_lines (все линии).
 
     Единица — одна ставка на матч: первый по времени снимок нужного момента входа,
-    а в нём КРАЙНЯЯ (минимальная) линия, попавшая в диапазон line_min..line_max.
-    Диапазон не задан → берётся просто крайняя линия матча (как крайняя линия
-    рынка у Pro/Prime). Результат/кф — из выбранной линии."""
+    а в нём выбирается ОДНА линия:
+      • задан фильтр линии (значения / диапазон от-до) → крайняя (минимальная)
+        линия в рамках фильтра;
+      • фильтр не задан → «ровная» линия = МЕДИАННАЯ (центр лестницы) —
+        отсортировать линии матча и взять элемент по середине списка.
+    Результат/кф — из выбранной линии."""
     src = SOURCES[source_key]
     odds_col, res_col = m["odds"], m["result"]   # b_odds/m_odds, r_b/r_m
     where = ["tl.kind = ?", f"tl.{odds_col} IS NOT NULL",
@@ -237,6 +240,9 @@ def _collect_tl_bets(source_key, p, m):
         where.append("tl.line >= ?"); args.append(float(p["line_min"]))
     if p.get("line_max") is not None:
         where.append("tl.line <= ?"); args.append(float(p["line_max"]))
+    # есть ли хоть какой-то фильтр линии → крайняя; иначе медианная («ровная»)
+    has_line_filter = bool(sel_lines) or p.get("line_min") is not None \
+        or p.get("line_max") is not None
 
     # момент входа (колонки снимка s)
     entry = p.get("entry", {}) or {}
@@ -269,24 +275,41 @@ def _collect_tl_bets(source_key, p, m):
     if pw:
         where.append(pw); args.extend(pa)
 
+    # Берём ВСЕ линии ПЕРВОГО (по времени) подходящего снимка каждого матча
+    # (snap_rank = 1), а нужную линию выбираем в Python: крайнюю при фильтре или
+    # медианную «ровную» без фильтра.
     meta = ", ".join(META_COLS)
     sql = f"""
-        SELECT {meta}, odds_val, res_val, line_val
+        SELECT id, {meta}, odds_val, res_val, line_val
         FROM (
             SELECT s.*, tl.line AS line_val, tl.{odds_col} AS odds_val, tl.{res_col} AS res_val,
-                   ROW_NUMBER() OVER (
-                       PARTITION BY s.event_id ORDER BY s.id ASC, tl.line ASC
-                   ) AS rn
+                   DENSE_RANK() OVER (
+                       PARTITION BY s.event_id ORDER BY s.id ASC
+                   ) AS snap_rank
             FROM market_snapshots s
             JOIN total_lines tl ON tl.snapshot_id = s.id
             WHERE {' AND '.join(where)}
-        ) WHERE rn = 1
-        ORDER BY id ASC
+        ) WHERE snap_rank = 1
+        ORDER BY id ASC, line_val ASC
     """
     con = _connect(source_key)
     rows = con.execute(sql, args).fetchall()
     con.close()
-    return _tl_bets_from_rows(rows, p.get("stake", 1000.0))
+
+    # группируем линии по матчу и выбираем одну на матч
+    by_event = {}
+    for r in rows:
+        by_event.setdefault(r["event_id"], []).append(r)
+    selected = []
+    for ev_rows in by_event.values():
+        ev_rows.sort(key=lambda x: x["line_val"])          # линии по возрастанию
+        if has_line_filter:
+            chosen = ev_rows[0]                            # крайняя (мин) в фильтре
+        else:
+            chosen = ev_rows[len(ev_rows) // 2]            # медианная («ровная»)
+        selected.append(chosen)
+    selected.sort(key=lambda x: x["id"])                   # порядок ставок по времени
+    return _tl_bets_from_rows(selected, p.get("stake", 1000.0))
 
 
 def _collect_market_bets(source_key, p):
