@@ -74,13 +74,22 @@ def source_meta(source_key):
         out["matches"] = con.execute(f"SELECT COUNT(DISTINCT event_id) FROM {table}").fetchone()[0]
         dr = con.execute(f"SELECT MIN(date(created_at)), MAX(date(created_at)) FROM {table}").fetchone()
         # Доступные значения линий по каждой колонке рынка (для чекбоксов форы и
-        # подсказки диапазона тоталов/инд.тоталов).
-        line_cols = sorted({m["line"] for m in src["markets"] if m.get("line")})
-        out["line_values"] = {
-            col: [r[0] for r in con.execute(
-                f"SELECT DISTINCT {col} FROM {table} WHERE {col} IS NOT NULL ORDER BY {col}")]
-            for col in line_cols
-        }
+        # подсказки диапазона тоталов/инд.тоталов). Рынки с tl_kind (тоталы CAGE)
+        # берут линии из дочерней таблицы total_lines по виду (kind), остальные —
+        # из плоской колонки снимка.
+        line_values = {}
+        for m in src["markets"]:
+            lc = m.get("line")
+            if not lc or lc in line_values:
+                continue
+            if m.get("tl_kind"):
+                line_values[lc] = [r[0] for r in con.execute(
+                    "SELECT DISTINCT line FROM total_lines WHERE kind = ? AND line IS NOT NULL "
+                    "ORDER BY line", (m["tl_kind"],))]
+            else:
+                line_values[lc] = [r[0] for r in con.execute(
+                    f"SELECT DISTINCT {lc} FROM {table} WHERE {lc} IS NOT NULL ORDER BY {lc}")]
+        out["line_values"] = line_values
     out["date_from"], out["date_to"] = dr[0], dr[1]
     # Реальные пары (встречи), порядок команд не важен — для фильтра пар.
     seen, pairs = set(), []
@@ -184,6 +193,102 @@ def _pair_stats(bets, stake):
 
 # --- Сбор ставок -------------------------------------------------------------
 
+def _tl_bets_from_rows(rows, stake):
+    bets = []
+    for r in rows:
+        prof = _profit(r["res_val"], r["odds_val"], stake)
+        bets.append({
+            "event_id": r["event_id"], "league": r["league"],
+            "team1": r["team1"], "team2": r["team2"],
+            "date": (r["created_at"] or "")[:19],
+            "game_minute": r["game_minute"],
+            "odds": r["odds_val"], "line": r["line_val"],
+            "result": r["res_val"], "final_score": r["final_score"],
+            "profit": round(prof, 2),
+        })
+    return bets
+
+
+def _collect_tl_bets(source_key, p, m):
+    """Ставки для рынков CAGE из дочерней таблицы total_lines (все линии).
+
+    Единица — одна ставка на матч: первый по времени снимок нужного момента входа,
+    а в нём КРАЙНЯЯ (минимальная) линия, попавшая в диапазон line_min..line_max.
+    Диапазон не задан → берётся просто крайняя линия матча (как крайняя линия
+    рынка у Pro/Prime). Результат/кф — из выбранной линии."""
+    src = SOURCES[source_key]
+    odds_col, res_col = m["odds"], m["result"]   # b_odds/m_odds, r_b/r_m
+    where = ["tl.kind = ?", f"tl.{odds_col} IS NOT NULL",
+             f"tl.{res_col} IN ('{WIN}','{LOSE}','{PUSH}')"]
+    args = [m["tl_kind"]]
+
+    # диапазон кф (по выбранной стороне линии)
+    if p.get("odds_min") is not None:
+        where.append(f"tl.{odds_col} >= ?"); args.append(float(p["odds_min"]))
+    if p.get("odds_max") is not None:
+        where.append(f"tl.{odds_col} <= ?"); args.append(float(p["odds_max"]))
+
+    # фильтр линии: конкретные значения (lines IN ...) и/или диапазон от/до
+    sel_lines = p.get("lines") or []
+    if sel_lines:
+        where.append("tl.line IN (%s)" % ",".join("?" * len(sel_lines)))
+        args.extend(float(x) for x in sel_lines)
+    if p.get("line_min") is not None:
+        where.append("tl.line >= ?"); args.append(float(p["line_min"]))
+    if p.get("line_max") is not None:
+        where.append("tl.line <= ?"); args.append(float(p["line_max"]))
+
+    # момент входа (колонки снимка s)
+    entry = p.get("entry", {}) or {}
+    kind = entry.get("kind")
+    if kind == "prematch" and src["prematch_where"]:
+        where.append(f"({src['prematch_where']})")
+    elif kind == "minute" and entry.get("n") is not None:
+        where.append("game_minute = ?"); args.append(int(entry["n"]))
+    elif kind == "break" and entry.get("n") is not None:
+        where.append(f"{src['period_col']} = ?"); args.append(int(entry["n"]))
+
+    # лиги / даты
+    leagues = p.get("leagues") or []
+    if leagues:
+        where.append("league IN (%s)" % ",".join("?" * len(leagues)))
+        args.extend(leagues)
+    if p.get("date_from"):
+        where.append("date(created_at) >= ?"); args.append(p["date_from"])
+    if p.get("date_to"):
+        where.append("date(created_at) <= ?"); args.append(p["date_to"])
+
+    # время суток / дни недели / пары (колонки снимка s)
+    tww, twa = _time_where("snap_dt_msk", p.get("time_windows"))
+    if tww:
+        where.append(tww); args.extend(twa)
+    dww, dwa = _weekday_where("created_at", p.get("weekdays"))
+    if dww:
+        where.append(dww); args.extend(dwa)
+    pw, pa = _pair_where(p.get("pairs"))
+    if pw:
+        where.append(pw); args.extend(pa)
+
+    meta = ", ".join(META_COLS)
+    sql = f"""
+        SELECT {meta}, odds_val, res_val, line_val
+        FROM (
+            SELECT s.*, tl.line AS line_val, tl.{odds_col} AS odds_val, tl.{res_col} AS res_val,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY s.event_id ORDER BY s.id ASC, tl.line ASC
+                   ) AS rn
+            FROM market_snapshots s
+            JOIN total_lines tl ON tl.snapshot_id = s.id
+            WHERE {' AND '.join(where)}
+        ) WHERE rn = 1
+        ORDER BY id ASC
+    """
+    con = _connect(source_key)
+    rows = con.execute(sql, args).fetchall()
+    con.close()
+    return _tl_bets_from_rows(rows, p.get("stake", 1000.0))
+
+
 def _collect_market_bets(source_key, p):
     """Возвращает список ставок (dict) для market/period источника."""
     src = SOURCES[source_key]
@@ -191,6 +296,8 @@ def _collect_market_bets(source_key, p):
     m = market_by_code(source_key, p["market"])
     if not m:
         raise ValueError(f"Неизвестный рынок {p['market']} для {source_key}")
+    if m.get("tl_kind"):
+        return _collect_tl_bets(source_key, p, m)
     odds_col, res_col, line_col = m["odds"], m["result"], m.get("line")
 
     where = [f"{odds_col} IS NOT NULL",
