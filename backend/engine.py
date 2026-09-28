@@ -209,6 +209,26 @@ def _tl_bets_from_rows(rows, stake):
     return bets
 
 
+# «Ровная» линия = линия, где кф выбранной стороны ≈ 2.0. Значения окна — те же,
+# что у стратегии IPBL в боте (fonbet-ipbl/config.py KF_MIN/KF_MAX): берём
+# наибольший кф в [1.95, 2.10], иначе — наибольший доступный (ближайший снизу).
+EVEN_KF_MIN = 1.95
+EVEN_KF_MAX = 2.10
+
+
+def _pick_even_line(ev_rows):
+    """Из линий одного снимка выбирает «ровную» — кф выбранной стороны (odds_val)
+    около 2.0, тем же правилом, что стратегия ТМ в боте (signals.pick_tm_line):
+    наибольший кф в окне [1.95, 2.10]; если в окно ничто не попало — наибольший
+    доступный кф. ev_rows отсортированы по линии (для детерминированного фоллбэка)."""
+    vals = [r for r in ev_rows if r["odds_val"] is not None]
+    if not vals:
+        return ev_rows[len(ev_rows) // 2]   # кф нет — центр лестницы как запас
+    in_range = [r for r in vals if EVEN_KF_MIN <= r["odds_val"] <= EVEN_KF_MAX]
+    pool = in_range or vals
+    return max(pool, key=lambda r: r["odds_val"])
+
+
 def _collect_tl_bets(source_key, p, m):
     """Ставки для рынков CAGE из дочерней таблицы total_lines (все линии).
 
@@ -216,8 +236,9 @@ def _collect_tl_bets(source_key, p, m):
     а в нём выбирается ОДНА линия:
       • задан фильтр линии (значения / диапазон от-до) → крайняя (минимальная)
         линия в рамках фильтра;
-      • фильтр не задан → «ровная» линия = МЕДИАННАЯ (центр лестницы) —
-        отсортировать линии матча и взять элемент по середине списка.
+      • фильтр не задан → «ровная» линия = линия с кф ВЫБРАННОЙ стороны ≈ 2.0
+        (то же правило, что у стратегии ТМ в боте: signals.pick_tm_line,
+        config.KF_MIN/KF_MAX = 1.95..2.10).
     Результат/кф — из выбранной линии."""
     src = SOURCES[source_key]
     odds_col, res_col = m["odds"], m["result"]   # b_odds/m_odds, r_b/r_m
@@ -306,7 +327,7 @@ def _collect_tl_bets(source_key, p, m):
         if has_line_filter:
             chosen = ev_rows[0]                            # крайняя (мин) в фильтре
         else:
-            chosen = ev_rows[len(ev_rows) // 2]            # медианная («ровная»)
+            chosen = _pick_even_line(ev_rows)              # «ровная» линия (кф ≈ 2.0)
         selected.append(chosen)
     selected.sort(key=lambda x: x["id"])                   # порядок ставок по времени
     return _tl_bets_from_rows(selected, p.get("stake", 1000.0))
