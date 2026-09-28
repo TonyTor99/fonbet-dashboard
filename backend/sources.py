@@ -50,6 +50,29 @@ CAGE_MARKETS = [
     {"code": "W2",    "label": "П2",                "odds": "win2_odds",  "result": "r_win2",  "line": None,         "group": "Исход"},
 ]
 
+# Рынки киберфутбола FC 26. Как CAGE (тоталы/инд.тоталы со ВСЕМИ линиями из
+# ДОЧЕРНЕЙ таблицы total_lines → ключ "tl_kind", при пустом фильтре берётся
+# «ровная» линия кф ≈ 2.0), но с реальными 1X2/двойными шансами/«обе забьют»
+# (плоские колонки market_snapshots). Периоды — таймы (period_col = "half").
+CYBER_MARKETS = [
+    {"code": "TB",    "label": "ТБ (тотал больше)", "odds": "b_odds",       "result": "r_b",       "line": "total_line", "group": "Тотал",        "tl_kind": "total"},
+    {"code": "TM",    "label": "ТМ (тотал меньше)", "odds": "m_odds",       "result": "r_m",       "line": "total_line", "group": "Тотал",        "tl_kind": "total"},
+    {"code": "IT1B",  "label": "Инд. тотал 1 Б",    "odds": "b_odds",       "result": "r_b",       "line": "it1_line",   "group": "Инд. тотал 1", "tl_kind": "it1"},
+    {"code": "IT1M",  "label": "Инд. тотал 1 М",    "odds": "m_odds",       "result": "r_m",       "line": "it1_line",   "group": "Инд. тотал 1", "tl_kind": "it1"},
+    {"code": "IT2B",  "label": "Инд. тотал 2 Б",    "odds": "b_odds",       "result": "r_b",       "line": "it2_line",   "group": "Инд. тотал 2", "tl_kind": "it2"},
+    {"code": "IT2M",  "label": "Инд. тотал 2 М",    "odds": "m_odds",       "result": "r_m",       "line": "it2_line",   "group": "Инд. тотал 2", "tl_kind": "it2"},
+    {"code": "F1",    "label": "Фора 1",            "odds": "fora1_odds",   "result": "r_fora1",   "line": "fora_line",  "group": "Фора"},
+    {"code": "F2",    "label": "Фора 2",            "odds": "fora2_odds",   "result": "r_fora2",   "line": "fora_line",  "group": "Фора"},
+    {"code": "W1",    "label": "П1",                "odds": "win1_odds",    "result": "r_win1",    "line": None,         "group": "Исход"},
+    {"code": "WX",    "label": "Ничья (X)",         "odds": "draw_odds",    "result": "r_draw",    "line": None,         "group": "Исход"},
+    {"code": "W2",    "label": "П2",                "odds": "win2_odds",    "result": "r_win2",    "line": None,         "group": "Исход"},
+    {"code": "DC1X",  "label": "1X (дв. шанс)",      "odds": "dc_1x_odds",   "result": "r_1x",      "line": None,         "group": "Двойной шанс"},
+    {"code": "DC12",  "label": "12 (дв. шанс)",      "odds": "dc_12_odds",   "result": "r_12",      "line": None,         "group": "Двойной шанс"},
+    {"code": "DCX2",  "label": "X2 (дв. шанс)",      "odds": "dc_x2_odds",   "result": "r_x2",      "line": None,         "group": "Двойной шанс"},
+    {"code": "BTTSY", "label": "Обе забьют — ДА",    "odds": "btts_yes_odds","result": "r_btts_yes","line": None,         "group": "Обе забьют"},
+    {"code": "BTTSN", "label": "Обе забьют — НЕТ",   "odds": "btts_no_odds", "result": "r_btts_no", "line": None,         "group": "Обе забьют"},
+]
+
 # Хоккейные доп. рынки (1X2 + двойные шансы)
 HOCKEY_EXTRA = [
     {"code": "HX",  "label": "Ничья (X)",   "odds": "draw_odds",   "result": "r_draw", "line": None, "group": "Исход"},
@@ -76,6 +99,14 @@ def _hockey_entry_points():
         {"kind": "prematch", "label": "Предматч"},
         {"kind": "minute",   "label": "Определённая минута игры"},
         {"kind": "break",    "label": "Перерыв между периодами", "values": [2, 3], "col": "period"},
+    ]
+
+
+def _football_entry_points():
+    return [
+        {"kind": "prematch", "label": "Предматч"},
+        {"kind": "minute",   "label": "Определённая минута игры"},
+        {"kind": "break",    "label": "Перерыв (2-й тайм)", "values": [2], "col": "half"},
     ]
 
 
@@ -130,6 +161,11 @@ SOURCES = {
         "label": "CAGE Division", "db": "cage_markets.db", "table": "market_snapshots",
         "kind": "market", "period_col": "quarter", "prematch_where": "is_prematch = 1",
         "markets": CAGE_MARKETS, "entry_points": _basket_entry_points(),
+    },
+    "cyber": {
+        "label": "Киберфутбол FC 26", "db": "cyberfootball_markets.db", "table": "market_snapshots",
+        "kind": "market", "period_col": "half", "prematch_where": "is_prematch = 1",
+        "markets": CYBER_MARKETS, "entry_points": _football_entry_points(),
     },
     "signals": {
         "label": "Сигналы ТМ (ipbl)", "db": "ipbl.db", "table": "signals",
