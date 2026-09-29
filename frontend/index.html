@@ -48,7 +48,7 @@ const favHistoryReq = (src, id, favorite) => api('/api/history/' + src + '/' + i
 const DEFAULT_F = {
   market: '', entryKind: '', entryN: '',
   oddsMin: '', oddsMax: '',
-  lines: [], lineMin: '', lineMax: '',
+  lines: [], lineMin: '', lineMax: '', offset: '',
   leagues: [], dateFrom: '', dateTo: '',
   timeWindows: '', weekdays: [],
   zapas: {}, pairs: [],
@@ -255,7 +255,19 @@ function LineFilter({ market, values, f, upd, toggleArr }) {
       </div>
     );
   }
-  // Тотал / инд. тотал — диапазон от/до (подсказка — доступный диапазон)
+  // All-lines источники (CAGE/кибер-футбол): линия задаётся ТОЛЬКО смещением от
+  // ровной (кф ≈ 2.0). Диапазон «Линия от/до» для них не показываем.
+  if (market.tl_kind) {
+    return (
+      <div className="fld">
+        <label><span>Смещение от ровной линии (0)</span>
+          <input type="number" step="1" placeholder="0"
+            value={f.offset} onChange={(e) => upd('offset', e.target.value)} /></label>
+        <div className="team-more">0 = ровная (кф ≈ 2.0); −1 = линия ниже (меньше тотал), +1 = выше. Кламп до крайних линий.</div>
+      </div>
+    );
+  }
+  // Плоский тотал / инд. тотал (Pro/Prime и пр.) — диапазон от/до (подсказка — доступный диапазон)
   const lo = vals.length ? vals[0] : '';
   const hi = vals.length ? vals[vals.length - 1] : '';
   return (
@@ -399,7 +411,7 @@ function App() {
     p.pairs.some((x) => pairKey(x) === pairKey(pr)) ? p : { ...p, pairs: [...p.pairs, pr] });
   const removePair = (pr) => setF((p) => ({ ...p, pairs: p.pairs.filter((x) => pairKey(x) !== pairKey(pr)) }));
   // Смена рынка сбрасывает фильтры линии (у разных рынков разные значения)
-  const changeMarket = (code) => setF((p) => ({ ...p, market: code, lines: [], lineMin: '', lineMax: '' }));
+  const changeMarket = (code) => setF((p) => ({ ...p, market: code, lines: [], lineMin: '', lineMax: '', offset: '' }));
 
   async function calc() {
     setLoading(true); setError(''); setResult(null);
@@ -419,7 +431,8 @@ function App() {
       } else {
         params = { ...base, market: f.market,
           entry: { kind: f.entryKind, n: f.entryN === '' ? null : Number(f.entryN) },
-          lines: f.lines, line_min: num(f.lineMin), line_max: num(f.lineMax) };
+          lines: f.lines, line_min: num(f.lineMin), line_max: num(f.lineMax),
+          even_offset: f.offset === '' ? 0 : Number(f.offset) };
       }
       const res = await runBacktest(params);
       setResult(res);

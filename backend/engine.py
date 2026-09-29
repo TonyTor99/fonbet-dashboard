@@ -216,17 +216,27 @@ EVEN_KF_MIN = 1.95
 EVEN_KF_MAX = 2.10
 
 
-def _pick_even_line(ev_rows):
-    """Из линий одного снимка выбирает «ровную» — кф выбранной стороны (odds_val)
-    около 2.0, тем же правилом, что стратегия ТМ в боте (signals.pick_tm_line):
-    наибольший кф в окне [1.95, 2.10]; если в окно ничто не попало — наибольший
-    доступный кф. ev_rows отсортированы по линии (для детерминированного фоллбэка)."""
-    vals = [r for r in ev_rows if r["odds_val"] is not None]
+def _even_index(ev_rows):
+    """Индекс «ровной» линии в ev_rows (отсортированы по линии ↑): кф выбранной
+    стороны (odds_val) ≈ 2.0 — наибольший кф в окне [1.95, 2.10], иначе наибольший
+    доступный (то же правило, что стратегия ТМ в боте signals.pick_tm_line)."""
+    vals = [(i, r["odds_val"]) for i, r in enumerate(ev_rows) if r["odds_val"] is not None]
     if not vals:
-        return ev_rows[len(ev_rows) // 2]   # кф нет — центр лестницы как запас
-    in_range = [r for r in vals if EVEN_KF_MIN <= r["odds_val"] <= EVEN_KF_MAX]
+        return len(ev_rows) // 2   # кф нет — центр лестницы как запас
+    in_range = [t for t in vals if EVEN_KF_MIN <= t[1] <= EVEN_KF_MAX]
     pool = in_range or vals
-    return max(pool, key=lambda r: r["odds_val"])
+    return max(pool, key=lambda t: t[1])[0]
+
+
+def _pick_even_line(ev_rows, offset=0):
+    """«Ровная» линия ± смещение по позиции лестницы (по значению тотала).
+
+    ev_rows отсортированы по линии ↑, поэтому offset<0 → линия НИЖЕ ровной (меньший
+    тотал), offset>0 → ВЫШЕ. Смещение клампится к крайним линиям снимка (если с одной
+    стороны линий меньше — упираемся в предельную). offset=0 = ровная (как раньше)."""
+    idx = _even_index(ev_rows)
+    idx = max(0, min(len(ev_rows) - 1, idx + int(offset)))
+    return ev_rows[idx]
 
 
 def _collect_tl_bets(source_key, p, m):
@@ -236,9 +246,10 @@ def _collect_tl_bets(source_key, p, m):
     а в нём выбирается ОДНА линия:
       • задан фильтр линии (значения / диапазон от-до) → крайняя (минимальная)
         линия в рамках фильтра;
-      • фильтр не задан → «ровная» линия = линия с кф ВЫБРАННОЙ стороны ≈ 2.0
-        (то же правило, что у стратегии ТМ в боте: signals.pick_tm_line,
-        config.KF_MIN/KF_MAX = 1.95..2.10).
+      • фильтр не задан → «ровная» линия (кф ВЫБРАННОЙ стороны ≈ 2.0) ± смещение
+        p["even_offset"] по лестнице (−N ниже по тоталу, +N выше, кламп к краям).
+        offset=0 = ровная. Правило ровной — как signals.pick_tm_line в боте
+        (config.KF_MIN/KF_MAX = 1.95..2.10).
     Результат/кф — из выбранной линии."""
     src = SOURCES[source_key]
     odds_col, res_col = m["odds"], m["result"]   # b_odds/m_odds, r_b/r_m
@@ -261,9 +272,14 @@ def _collect_tl_bets(source_key, p, m):
         where.append("tl.line >= ?"); args.append(float(p["line_min"]))
     if p.get("line_max") is not None:
         where.append("tl.line <= ?"); args.append(float(p["line_max"]))
-    # есть ли хоть какой-то фильтр линии → крайняя; иначе медианная («ровная»)
+    # есть ли хоть какой-то фильтр линии → крайняя; иначе «ровная» ± смещение
     has_line_filter = bool(sel_lines) or p.get("line_min") is not None \
         or p.get("line_max") is not None
+    # смещение от ровной линии по лестнице (−N ниже по тоталу, +N выше; 0 = ровная)
+    try:
+        offset = int(p.get("even_offset") or 0)
+    except (TypeError, ValueError):
+        offset = 0
 
     # момент входа (колонки снимка s)
     entry = p.get("entry", {}) or {}
@@ -327,7 +343,7 @@ def _collect_tl_bets(source_key, p, m):
         if has_line_filter:
             chosen = ev_rows[0]                            # крайняя (мин) в фильтре
         else:
-            chosen = _pick_even_line(ev_rows)              # «ровная» линия (кф ≈ 2.0)
+            chosen = _pick_even_line(ev_rows, offset)      # «ровная» ± смещение
         selected.append(chosen)
     selected.sort(key=lambda x: x["id"])                   # порядок ставок по времени
     return _tl_bets_from_rows(selected, p.get("stake", 1000.0))
