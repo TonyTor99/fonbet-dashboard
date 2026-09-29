@@ -323,28 +323,54 @@ function PairFilter({ pairs, selected, onAdd, onRemove }) {
   );
 }
 
+// Ник игрока зашит в названии команды в скобках: 'Португалия (Cold)' -> 'Cold'.
+function nickOf(team) {
+  const m = /\(([^)]*)\)\s*$/.exec(team || '');
+  return m ? m[1].trim() : '';
+}
+
 // --- Таблица статистики пар (поиск + сортировка по колонкам) ---
 function PairsTable({ pairs }) {
   const [q, setQ] = useState('');
   const [sort, setSort] = useState('n');
   const ql = q.trim().toLowerCase();
-  let list = ql ? pairs.filter((p) => p.pair.toLowerCase().includes(ql)) : pairs.slice();
-  list.sort((a, b) => (sort === 'pair' ? a.pair.localeCompare(b.pair) : b[sort] - a[sort]));
+  // Для источников с ником игрока (киберфутбол: 'Команда (Ник)') показываем
+  // отдельные колонки Ник 1 / Ник 2 и разрешаем сортировку по нику.
+  const hasNick = pairs.some((p) => p.pair.includes('('));
+  const withNick = pairs.map((p) => {
+    const parts = p.pair.split(' — ');
+    return { ...p, _nick1: nickOf(parts[0]), _nick2: nickOf(parts[1]) };
+  });
+  let list = ql
+    ? withNick.filter((p) => p.pair.toLowerCase().includes(ql)
+        || p._nick1.toLowerCase().includes(ql) || p._nick2.toLowerCase().includes(ql))
+    : withNick.slice();
+  list.sort((a, b) => {
+    if (sort === 'pair') return a.pair.localeCompare(b.pair);
+    if (sort === 'nick1') return a._nick1.localeCompare(b._nick1) || b.n - a.n;
+    if (sort === 'nick2') return a._nick2.localeCompare(b._nick2) || b.n - a.n;
+    return b[sort] - a[sort];
+  });
   const th = (key, label) => (
     <th className="sortable" onClick={() => setSort(key)}>{label}{sort === key ? ' ▾' : ''}</th>
   );
   return (
     <React.Fragment>
-      <input className="team-search" placeholder="поиск пары…" value={q} onChange={(e) => setQ(e.target.value)} />
+      <input className="team-search" placeholder="поиск пары или ника…" value={q} onChange={(e) => setQ(e.target.value)} />
       <div className="table-wrap">
         <table>
           <thead><tr>
-            {th('pair', 'Пара')}{th('n', 'Кол-во')}{th('winrate', 'Винрейт')}{th('profit', 'Прибыль')}{th('roi', 'ROI')}
+            {th('pair', 'Пара')}
+            {hasNick && th('nick1', 'Ник 1')}
+            {hasNick && th('nick2', 'Ник 2')}
+            {th('n', 'Кол-во')}{th('winrate', 'Винрейт')}{th('profit', 'Прибыль')}{th('roi', 'ROI')}
           </tr></thead>
           <tbody>
             {list.slice(0, 300).map((p, i) => (
               <tr key={i}>
                 <td>{p.pair}</td>
+                {hasNick && <td>{p._nick1}</td>}
+                {hasNick && <td>{p._nick2}</td>}
                 <td>{p.n}</td>
                 <td>{p.winrate}%</td>
                 <td className={p.profit >= 0 ? 'win' : 'lose'}>{fmt(p.profit)}</td>
