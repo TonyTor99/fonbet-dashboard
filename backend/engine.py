@@ -126,6 +126,24 @@ def _pair_where(pairs):
     return "(%s)" % " OR ".join(clauses), args
 
 
+def _nick_where(p):
+    """Фильтр по нику игрока (киберфутбол FC 26): названия команд там вида
+    «Команда (Ник)». Позиционно — ник команды-хозяина ищется в team1 (дом), ник
+    команды-гостей в team2 (гости), как подстрока. Оба поля опциональны и
+    объединяются через AND (если заданы оба — только очные встречи двух игроков в
+    заданных ролях). LIKE регистронезависим для латиницы (обычный формат ников)."""
+    clauses, args = [], []
+    home = (p.get("nick_home") or "").strip()
+    away = (p.get("nick_away") or "").strip()
+    if home:
+        clauses.append("team1 LIKE ?"); args.append(f"%{home}%")
+    if away:
+        clauses.append("team2 LIKE ?"); args.append(f"%{away}%")
+    if not clauses:
+        return None, []
+    return "(%s)" % " AND ".join(clauses), args
+
+
 def _time_where(col, windows):
     """windows: [["10:00","12:00"], ...] — время суток МСК. Ставка подходит, если
     время суток снимка (`col` формата 'YYYY-MM-DD HH:MM:SS') попадает в любой
@@ -311,6 +329,10 @@ def _collect_tl_bets(source_key, p, m):
     pw, pa = _pair_where(p.get("pairs"))
     if pw:
         where.append(pw); args.extend(pa)
+    # ник игрока (киберфутбол): дом → team1, гости → team2 (подстрока)
+    nw, na = _nick_where(p)
+    if nw:
+        where.append(nw); args.extend(na)
 
     # Берём ВСЕ линии ПЕРВОГО (по времени) подходящего снимка каждого матча
     # (snap_rank = 1), а нужную линию выбираем в Python: крайнюю при фильтре или
@@ -422,6 +444,10 @@ def _collect_market_bets(source_key, p):
     pw, pa = _pair_where(p.get("pairs"))
     if pw:
         where.append(pw); args.extend(pa)
+    # ник игрока (киберфутбол): дом → team1, гости → team2 (подстрока)
+    nw, na = _nick_where(p)
+    if nw:
+        where.append(nw); args.extend(na)
 
     meta = ", ".join(META_COLS)
     line_sel = f", {line_col} AS line_val" if line_col else ", NULL AS line_val"

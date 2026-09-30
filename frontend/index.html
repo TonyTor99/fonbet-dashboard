@@ -51,7 +51,7 @@ const DEFAULT_F = {
   lines: [], lineMin: '', lineMax: '', offset: '',
   leagues: [], dateFrom: '', dateTo: '',
   timeWindows: '', weekdays: [],
-  zapas: {}, pairs: [],
+  zapas: {}, pairs: [], nickHome: '', nickAway: '',
   stake: 1000, bank: 100000,
 };
 
@@ -458,7 +458,8 @@ function App() {
         params = { ...base, market: f.market,
           entry: { kind: f.entryKind, n: f.entryN === '' ? null : Number(f.entryN) },
           lines: f.lines, line_min: num(f.lineMin), line_max: num(f.lineMax),
-          even_offset: f.offset === '' ? 0 : Number(f.offset) };
+          even_offset: f.offset === '' ? 0 : Number(f.offset),
+          nick_home: f.nickHome, nick_away: f.nickAway };
       }
       const res = await runBacktest(params);
       setResult(res);
@@ -617,6 +618,17 @@ function App() {
 
           {meta && meta.pairs && meta.pairs.length > 0 && (
             <PairFilter pairs={meta.pairs} selected={f.pairs} onAdd={addPair} onRemove={removePair} />
+          )}
+
+          {sourceKey === 'cyber' && (
+            <div className="fld row">
+              <label><span>Ник дома (team1)</span>
+                <input type="text" placeholder="ник игрока" value={f.nickHome}
+                  onChange={(e) => upd('nickHome', e.target.value)} /></label>
+              <label><span>Ник гостей (team2)</span>
+                <input type="text" placeholder="ник игрока" value={f.nickAway}
+                  onChange={(e) => upd('nickAway', e.target.value)} /></label>
+            </div>
           )}
 
           <div className="fld row">
