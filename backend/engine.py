@@ -126,19 +126,38 @@ def _pair_where(pairs):
     return "(%s)" % " OR ".join(clauses), args
 
 
+def _nick_norm(v):
+    """Приводит значение фильтра ников к списку непустых строк (поддержка старого
+    строкового формата и нового — массива выбранных ников)."""
+    if v is None:
+        return []
+    if isinstance(v, str):
+        v = v.strip()
+        return [v] if v else []
+    return [str(x).strip() for x in v if str(x).strip()]
+
+
 def _nick_where(p):
     """Фильтр по нику игрока (киберфутбол FC 26): названия команд там вида
-    «Команда (Ник)». Позиционно — ник команды-хозяина ищется в team1 (дом), ник
-    команды-гостей в team2 (гости), как подстрока. Оба поля опциональны и
-    объединяются через AND (если заданы оба — только очные встречи двух игроков в
-    заданных ролях). LIKE регистронезависим для латиницы (обычный формат ников)."""
+    «Команда (Ник)». Позиционно: ники дома ищутся в team1, ники гостей в team2 —
+    скобочный ник совпадает точно (LIKE '%(Ник)%'). Внутри стороны выбранные ники
+    объединяются через OR (любой из), стороны между собой — через AND. Пустые
+    стороны игнорируются."""
+    def side(col, nicks):
+        parts, args = [], []
+        for n in nicks:
+            parts.append(f"{col} LIKE ?"); args.append(f"%({n})%")
+        if not parts:
+            return None, []
+        return "(%s)" % " OR ".join(parts), args
+
     clauses, args = [], []
-    home = (p.get("nick_home") or "").strip()
-    away = (p.get("nick_away") or "").strip()
-    if home:
-        clauses.append("team1 LIKE ?"); args.append(f"%{home}%")
-    if away:
-        clauses.append("team2 LIKE ?"); args.append(f"%{away}%")
+    hc, ha = side("team1", _nick_norm(p.get("nick_home")))
+    if hc:
+        clauses.append(hc); args.extend(ha)
+    ac, aa = side("team2", _nick_norm(p.get("nick_away")))
+    if ac:
+        clauses.append(ac); args.extend(aa)
     if not clauses:
         return None, []
     return "(%s)" % " AND ".join(clauses), args

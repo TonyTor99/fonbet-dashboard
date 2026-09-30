@@ -51,7 +51,7 @@ const DEFAULT_F = {
   lines: [], lineMin: '', lineMax: '', offset: '',
   leagues: [], dateFrom: '', dateTo: '',
   timeWindows: '', weekdays: [],
-  zapas: {}, pairs: [], nickHome: '', nickAway: '',
+  zapas: {}, pairs: [], nickHome: [], nickAway: [],
   stake: 1000, bank: 100000,
 };
 
@@ -323,6 +323,47 @@ function PairFilter({ pairs, selected, onAdd, onRemove }) {
   );
 }
 
+// Мультивыбор ников игроков (чекбоксы + поиск + выбрать/снять все).
+// options — список ников, selected — массив выбранных, onChange(newArr).
+function NickSelect({ label, options, selected, onChange }) {
+  const [q, setQ] = useState('');
+  const [open, setOpen] = useState(false);
+  const ql = q.trim().toLowerCase();
+  const list = ql ? options.filter((o) => o.toLowerCase().includes(ql)) : options;
+  const sel = new Set(selected);
+  const toggle = (o) => onChange(sel.has(o) ? selected.filter((x) => x !== o) : [...selected, o]);
+  // «Выбрать/снять все» действуют на ОТФИЛЬТРОВАННЫЙ поиском список.
+  const selectAll = () => onChange(Array.from(new Set([...selected, ...list])));
+  const clearAll = () => onChange(selected.filter((o) => !list.includes(o)));
+  return (
+    <div className="fld">
+      <span className="collapse-head" onClick={() => setOpen((v) => !v)}>
+        <span className="chevron">{open ? '▾' : '▸'}</span>
+        {label} ({selected.length ? selected.length : 'все'})
+      </span>
+      {open && (
+        <React.Fragment>
+          <input className="team-search" placeholder="поиск ника…" value={q} onChange={(e) => setQ(e.target.value)} />
+          <div className="team-btns">
+            <button type="button" onClick={selectAll}>Выбрать все</button>
+            <button type="button" onClick={clearAll}>Снять все</button>
+          </div>
+          <div className="team-list">
+            {list.slice(0, 300).map((o) => (
+              <label key={o} className="check">
+                <input type="checkbox" checked={sel.has(o)} onChange={() => toggle(o)} />
+                {o}
+              </label>
+            ))}
+            {list.length > 300 && <div className="team-more">…ещё {list.length - 300}, уточни поиск</div>}
+            {!list.length && <div className="team-more">{options.length ? 'ничего не найдено' : 'нет ников'}</div>}
+          </div>
+        </React.Fragment>
+      )}
+    </div>
+  );
+}
+
 // Ник игрока зашит в названии команды в скобках: 'Португалия (Cold)' -> 'Cold'.
 function nickOf(team) {
   const m = /\(([^)]*)\)\s*$/.exec(team || '');
@@ -427,6 +468,17 @@ function App() {
       setF(nf);
     }).catch((e) => setError(e.message));
   }, [sourceKey]);
+
+  // Список всех ников игроков (из названий команд встреч) — для мультивыбора дом/гости.
+  const nickOptions = React.useMemo(() => {
+    if (!meta || !meta.pairs) return [];
+    const s = new Set();
+    meta.pairs.forEach((p) => {
+      const a = nickOf(p[0]); const b = nickOf(p[1]);
+      if (a) s.add(a); if (b) s.add(b);
+    });
+    return Array.from(s).sort((x, y) => x.localeCompare(y));
+  }, [meta]);
 
   const upd = (k, v) => setF((p) => ({ ...p, [k]: v }));
   const toggleArr = (k, v) => setF((p) => ({
@@ -621,14 +673,12 @@ function App() {
           )}
 
           {sourceKey === 'cyber' && (
-            <div className="fld row">
-              <label><span>Ник дома (team1)</span>
-                <input type="text" placeholder="ник игрока" value={f.nickHome}
-                  onChange={(e) => upd('nickHome', e.target.value)} /></label>
-              <label><span>Ник гостей (team2)</span>
-                <input type="text" placeholder="ник игрока" value={f.nickAway}
-                  onChange={(e) => upd('nickAway', e.target.value)} /></label>
-            </div>
+            <React.Fragment>
+              <NickSelect label="Ник дома (team1)" options={nickOptions}
+                selected={f.nickHome} onChange={(v) => upd('nickHome', v)} />
+              <NickSelect label="Ник гостей (team2)" options={nickOptions}
+                selected={f.nickAway} onChange={(v) => upd('nickAway', v)} />
+            </React.Fragment>
           )}
 
           <div className="fld row">

@@ -129,6 +129,10 @@ select.team-slot { width: 66px; flex-shrink: 0; padding: 6px 8px; font-size: 13p
 .team-list { margin-top: 6px; max-height: 200px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;
   background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
 .team-more { color: var(--muted); font-size: 11px; padding: 2px 0; }
+.team-btns { display: flex; gap: 6px; margin-top: 6px; }
+.team-btns button { flex: 1; font-size: 12px; padding: 4px 6px; cursor: pointer;
+  background: var(--panel2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; }
+.team-btns button:hover { border-color: var(--accent); color: var(--accent); }
 .pair-add { cursor: pointer; padding: 3px 4px; border-radius: 6px; }
 .pair-add:hover { background: var(--border); color: var(--accent); }
 th.sortable { cursor: pointer; user-select: none; }
