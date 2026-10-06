@@ -6,6 +6,7 @@
 Для signals — готовые записи стратегии (профит считаем сами из odds+result).
 """
 import os
+import math
 import sqlite3
 import datetime
 
@@ -618,6 +619,8 @@ def _metrics(bets, stake, bank):
     hourly_matches = [set() for _ in range(24)]  # матчи по часам
     monthly_profit = {}   # месяц 'YYYY-MM' -> суммарный профит
     monthly_matches = {}  # месяц 'YYYY-MM' -> множество event_id
+    odds_profit = {}      # индекс бина кф (шаг 0.05) -> суммарный профит
+    odds_matches = {}     # индекс бина кф -> множество event_id
     for b in bets:
         cum += b["profit"]
         peak = max(peak, cum)
@@ -649,6 +652,16 @@ def _metrics(bets, stake, bank):
             if 0 <= h < 24:
                 hourly[h] += b["profit"]
                 hourly_matches[h].add(b["event_id"])
+        # прибыль по диапазонам кф (шаг 0.05): бин = наименьший кратный 0.05,
+        # не меньше кф; напр. 1.90→«1.86-1.90», 1.91→«1.91-1.95», 2.00→«1.96-2.00».
+        try:
+            o = float(b["odds"])
+        except (TypeError, ValueError):
+            o = None
+        if o is not None and o > 0:
+            bi = math.ceil(o / 0.05 - 1e-9)   # индекс верхней границы бина
+            odds_profit[bi] = odds_profit.get(bi, 0.0) + b["profit"]
+            odds_matches.setdefault(bi, set()).add(b["event_id"])
 
     for day in sorted(daily):
         curve.append({"date": day, "cum_profit": round(daily[day], 2),
@@ -662,6 +675,13 @@ def _metrics(bets, stake, bank):
                     "matches": len(hourly_matches[h])} for h in range(24)]
     monthly_list = [{"month": m, "profit": round(monthly_profit[m], 2),
                      "matches": len(monthly_matches[m])} for m in sorted(monthly_profit)]
+    odds_list = []
+    for bi in sorted(odds_profit):
+        upper = bi * 0.05
+        lower = upper - 0.04
+        odds_list.append({"range": f"{lower:.2f}-{upper:.2f}",
+                          "profit": round(odds_profit[bi], 2),
+                          "matches": len(odds_matches[bi])})
 
     # просадка в днях (по дневной кривой эквити): длина периода ниже прошлого пика
     days_sorted = sorted(daily)
@@ -702,6 +722,7 @@ def _metrics(bets, stake, bank):
         "weekday_profit": weekday_list,
         "hourly_profit": hourly_list,
         "monthly_profit": monthly_list,
+        "odds_profit": odds_list,
     }
 
 

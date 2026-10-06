@@ -198,6 +198,10 @@ function Results({ result }) {
         <div className="panel-title">Прибыль по месяцам</div>
         <BarChart data={m.monthly_profit} labelKey="month" />
       </div>
+      <div className="panel">
+        <div className="panel-title">Прибыль по кф (диапазоны 0.05)</div>
+        <BarChart data={m.odds_profit} labelKey="range" />
+      </div>
       {result.pairs && result.pairs.length > 0 && (
         <div className="panel">
           <div className="panel-title">Статистика встреч пар ({result.pairs.length})</div>
