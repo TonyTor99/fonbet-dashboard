@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Fonbet Dashboard</title>
-  <link rel="stylesheet" href="/app.css?v=6" />
+  <link rel="stylesheet" href="/app.css?v=7" />
   <script src="/vendor/react.js"></script>
   <script src="/vendor/react-dom.js"></script>
   <script src="/vendor/chart.js"></script>
@@ -43,6 +43,9 @@ const delHistory = (src, id) => api('/api/history/' + src + '/' + id, { method: 
 const clearHistoryReq = (src) => api('/api/history/' + src, { method: 'DELETE' });
 const favHistoryReq = (src, id, favorite) => api('/api/history/' + src + '/' + id + '/favorite', {
   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ favorite }),
+});
+const nameHistoryReq = (src, id, name) => api('/api/history/' + src + '/' + id + '/name', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }),
 });
 
 const DEFAULT_F = {
@@ -441,6 +444,7 @@ function App() {
   const [msg, setMsg] = useState('');
   const [history, setHistory] = useState([]);
   const [histOpen, setHistOpen] = useState(true);
+  const [activeHistId, setActiveHistId] = useState(null);   // открытая из истории запись
 
   useEffect(() => {
     getSources().then((s) => { setSources(s); if (s.length) setSourceKey(s[0].key); });
@@ -519,6 +523,7 @@ function App() {
       }
       const res = await runBacktest(params);
       setResult(res);
+      setActiveHistId(null);
       saveHistoryEntry(params, res.metrics);
     } catch (e) { setError(e.message); } finally { setLoading(false); }
   }
@@ -550,12 +555,23 @@ function App() {
     } catch (e) {}
   }
 
+  // Своё название записи избранного (пусто — убрать название)
+  async function renameHistory(entry) {
+    const name = window.prompt('Название избранного (пусто — убрать):', entry.name || '');
+    if (name === null) return;
+    try {
+      const upd = await nameHistoryReq(sourceKey, entry.id, name);
+      setHistory((arr) => arr.map((e) => e.id === upd.id ? upd : e));
+    } catch (e) {}
+  }
+
   async function clearHistory() {
-    try { await clearHistoryReq(sourceKey); setHistory([]); } catch (e) {}
+    try { await clearHistoryReq(sourceKey); setHistory((arr) => arr.filter((e) => e.favorite)); } catch (e) {}
   }
 
   // Восстановить параметры расчёта из истории и показать результат
   async function restoreHistory(entry) {
+    setActiveHistId(entry.id);
     setF({ ...DEFAULT_F, ...entry.form });
     setLoading(true); setError(''); setResult(null);
     try { setResult(await runBacktest(entry.params)); }
@@ -575,12 +591,16 @@ function App() {
   const curEntry = meta && meta.entry_points ? meta.entry_points.find((e) => e.kind === f.entryKind) : null;
   const curMarket = meta && meta.markets ? meta.markets.find((m) => m.code === f.market) : null;
   const curLineVals = curMarket && meta.line_values ? meta.line_values[curMarket.line] : null;
+  const activeHist = history.find((e) => e.id === activeHistId);
 
   return (
     <div className="app">
       <header className="topbar">
         <div className="brand">📊 Fonbet Dashboard</div>
         <div className="topbar-right">
+          {activeHist && activeHist.name && (
+            <span className="active-fav" title="Открыт расчёт из избранного">★ {activeHist.name}</span>
+          )}
           <span className="status">
             Снимки: {status && status.snapshots_updated ? status.snapshots_updated : '—'}
             {status && !status.live_available && <span className="badge">локально</span>}
@@ -722,11 +742,13 @@ function App() {
               {histOpen && (
                 <div className="hist-list">
                   {history.slice().sort((a, b) => (b.favorite ? 1 : 0) - (a.favorite ? 1 : 0)).map((e) => (
-                    <div key={e.id} className={'hist-row' + (e.favorite ? ' hist-fav' : '')}>
+                    <div key={e.id} className={'hist-row' + (e.favorite ? ' hist-fav' : '')
+                                               + (e.id === activeHistId ? ' hist-active' : '')}>
                       <button type="button" className={'hist-star' + (e.favorite ? ' on' : '')}
                               title={e.favorite ? 'Убрать из избранного' : 'В избранное'}
                               onClick={() => toggleFavorite(e)}>{e.favorite ? '★' : '☆'}</button>
                       <div className="hist-main" onClick={() => restoreHistory(e)} title="Показать этот расчёт">
+                        {e.name && <div className="hist-name">{e.name}</div>}
                         <div className="hist-ts">{e.ts}</div>
                         <div className="hist-sum">
                           {e.summary.bets} ст ·{' '}
@@ -735,6 +757,10 @@ function App() {
                           </span>{' '}· ВР {e.summary.winrate}%
                         </div>
                       </div>
+                      {e.favorite && (
+                        <button type="button" className="hist-rename" title="Своё название"
+                                onClick={() => renameHistory(e)}>✎</button>
+                      )}
                       <button type="button" className="team-x" title="удалить" onClick={() => deleteHistory(e.id)}>×</button>
                     </div>
                   ))}

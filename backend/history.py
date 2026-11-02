@@ -39,6 +39,9 @@ def init_db():
     cols = [r["name"] for r in con.execute("PRAGMA table_info(history)").fetchall()]
     if "favorite" not in cols:
         con.execute("ALTER TABLE history ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0")
+    # своё название записи (для избранных; NULL = без названия)
+    if "name" not in cols:
+        con.execute("ALTER TABLE history ADD COLUMN name TEXT")
     con.commit()
     con.close()
 
@@ -47,6 +50,7 @@ def _row_to_entry(r):
     return {
         "id": r["id"], "ts": r["ts"],
         "favorite": bool(r["favorite"]),
+        "name": r["name"] or "",
         "form": json.loads(r["form"]),
         "params": json.loads(r["params"]),
         "summary": json.loads(r["summary"]),
@@ -90,6 +94,21 @@ def set_favorite(source, entry_id, favorite):
     con = _con()
     con.execute("UPDATE history SET favorite=? WHERE source=? AND id=?",
                 (1 if favorite else 0, source, entry_id))
+    con.commit()
+    row = con.execute("SELECT * FROM history WHERE source=? AND id=?",
+                      (source, entry_id)).fetchone()
+    con.close()
+    return _row_to_entry(row) if row else None
+
+
+NAME_MAX = 60  # длина своего названия записи
+
+
+def set_name(source, entry_id, name):
+    """Своё название записи ('' / None — убрать). Возвращает обновлённую запись или None."""
+    name = " ".join((name or "").split())[:NAME_MAX] or None
+    con = _con()
+    con.execute("UPDATE history SET name=? WHERE source=? AND id=?", (name, source, entry_id))
     con.commit()
     row = con.execute("SELECT * FROM history WHERE source=? AND id=?",
                       (source, entry_id)).fetchone()
