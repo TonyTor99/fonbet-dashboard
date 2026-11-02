@@ -591,6 +591,49 @@ def _collect_signal_bets(source_key, p):
     return bets
 
 
+# --- Дневной стоп («точка выхода») ---------------------------------------------
+
+def _apply_day_stop(bets, stop_win, stop_loss):
+    """Точка выхода за день: ставки дня идут по времени, считаем счёт
+    (плюсовые − минусовые, возврат = 0). Как только счёт дошёл до +stop_win или
+    до −stop_loss, остальные ставки ЭТОГО дня пропускаются. None/0 = порог выключен.
+    День — календарная дата ставки (МСК). Упрощение: итог ставки считаем известным
+    до следующей ставки (у ставок нет времени окончания матча).
+    Возвращает (оставленные ставки, сводка)."""
+    info = {"stop_win": stop_win, "stop_loss": stop_loss,
+            "skipped": 0, "days_win": 0, "days_loss": 0}
+    if not stop_win and not stop_loss:
+        return bets, None
+    kept = []
+    day, score, stopped = None, 0, False
+    for b in sorted(bets, key=lambda x: x["date"] or ""):   # sorted стабилен
+        d = (b["date"] or "")[:10]
+        if d != day:
+            day, score, stopped = d, 0, False
+        if stopped:
+            info["skipped"] += 1
+            continue
+        kept.append(b)
+        if b["result"] == WIN:
+            score += 1
+        elif b["result"] == LOSE:
+            score -= 1
+        if stop_win and score >= stop_win:
+            stopped = True; info["days_win"] += 1
+        elif stop_loss and score <= -stop_loss:
+            stopped = True; info["days_loss"] += 1
+    return kept, info
+
+
+def _pos_int(v):
+    """Порог стопа из параметров: целое > 0, иначе None (выключен)."""
+    try:
+        v = int(v)
+    except (TypeError, ValueError):
+        return None
+    return v if v > 0 else None
+
+
 # --- Прибыль по линии (автоматические группы) --------------------------------
 
 LINE_GROUPS = 8          # сколько групп стараемся получить
@@ -807,10 +850,13 @@ def run_backtest(p):
         bets = _collect_signal_bets(source_key, p)
     else:
         bets = _collect_market_bets(source_key, p)
+    bets, day_stop = _apply_day_stop(bets, _pos_int(p.get("stop_win")),
+                                     _pos_int(p.get("stop_loss")))
 
     metrics = _metrics(bets, stake, bank)
     metrics["stake"] = stake
     metrics["bank"] = bank
+    metrics["day_stop"] = day_stop
     pairs = _pair_stats(bets, stake)
     # таблицу ставок отдаём ограниченно (первые 500), метрики/пары — по всем
     return {"metrics": metrics, "bets": bets[:500], "bets_total": len(bets),

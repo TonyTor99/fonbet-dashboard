@@ -56,6 +56,7 @@ const DEFAULT_F = {
   timeWindows: '', weekdays: [],
   zapas: {}, pairs: [], nickHome: [], nickAway: [],
   stake: 1000, bank: 100000,
+  stopWin: '', stopLoss: '',   // точка выхода за день (в ставках: плюсовые − минусовые)
 };
 
 // Дни недели для чекбоксов (индекс 0=Пн … 6=Вс, совпадает с бэкендом)
@@ -178,6 +179,12 @@ function Results({ result }) {
         <Card label="Макс. просадка" value={m.max_drawdown_pct + '%'} sub={fmt(m.max_drawdown)} color="red" />
         <Card label="Просадка, дней" value={m.max_drawdown_days} sub={'текущая: ' + m.current_drawdown_days} color={m.current_drawdown_days > 0 ? 'red' : ''} />
         <Card label="Макс. серия +/−" value={m.max_win_streak + ' / ' + m.max_lose_streak} sub="плюсов / минусов" />
+        {m.day_stop && (
+          <Card label="Точка выхода за день"
+                value={(m.day_stop.stop_win ? '+' + m.day_stop.stop_win : '—') + ' / ' + (m.day_stop.stop_loss ? '−' + m.day_stop.stop_loss : '—')}
+                sub={'стопов: в плюсе ' + m.day_stop.days_win + ', в минусе ' + m.day_stop.days_loss
+                     + ' · пропущено ставок ' + m.day_stop.skipped} />
+        )}
       </div>
       <div className="panel">
         <div className="panel-title">Кривая прибыли (% от банка)</div>
@@ -538,6 +545,7 @@ function App() {
         weekdays: f.weekdays,
         pairs: f.pairs,
         stake: num(f.stake) || 1000, bank: num(f.bank) || 100000,
+        stop_win: num(f.stopWin), stop_loss: num(f.stopLoss),
       };
       let params;
       if (meta.kind === 'signals') {
@@ -754,6 +762,15 @@ function App() {
           <div className="fld row">
             <label><span>Ставка</span><input type="number" value={f.stake} onChange={(e) => upd('stake', e.target.value)} /></label>
             <label><span>Банк</span><input type="number" value={f.bank} onChange={(e) => upd('bank', e.target.value)} /></label>
+          </div>
+          <div className="fld"><span>Точка выхода за день (в ставках)</span>
+            <div className="zapas-hint">Счёт дня = плюсовые − минусовые. Дошли до порога — остальные ставки дня пропускаем. Пусто — не применяется.</div>
+            <div className="fld row">
+              <label><span>Стоп в плюсе +</span><input type="number" min="1" step="1" placeholder="напр. 3"
+                value={f.stopWin} onChange={(e) => upd('stopWin', e.target.value)} /></label>
+              <label><span>Стоп в минусе −</span><input type="number" min="1" step="1" placeholder="напр. 3"
+                value={f.stopLoss} onChange={(e) => upd('stopLoss', e.target.value)} /></label>
+            </div>
           </div>
 
           <button className="btn-calc" onClick={calc} disabled={loading || !meta}>
