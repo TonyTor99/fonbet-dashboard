@@ -169,7 +169,9 @@ if os.path.isdir(FRONT):
 
     @app.get("/")
     def index():
-        return FileResponse(os.path.join(FRONT, "index.html"))
+        # no-cache: после деплоя браузер сразу берёт новую страницу (без Ctrl+F5)
+        return FileResponse(os.path.join(FRONT, "index.html"),
+                            headers={"Cache-Control": "no-cache"})
 
     @app.get("/app.css")
     def appcss():

@@ -84,6 +84,7 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
 .panel-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; color: var(--text); }
 .chart-empty { color: var(--muted); padding: 40px; text-align: center; }
+.muted { color: var(--muted); font-size: 12px; }
 
 .table-wrap { overflow-x: auto; max-height: 460px; overflow-y: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }

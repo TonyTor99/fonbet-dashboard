@@ -591,6 +591,71 @@ def _collect_signal_bets(source_key, p):
     return bets
 
 
+# --- Прибыль по линии (автоматические группы) --------------------------------
+
+LINE_GROUPS = 8          # сколько групп стараемся получить
+LINE_GROUP_MIN = 15      # минимум ставок в группе (при малой выборке групп меньше)
+
+
+def _line_profit(bets, stake):
+    """Разбивка прибыли по ЛИНИИ ставки (тотал/фора/ИТ на момент входа).
+
+    Диапазоны подбираются сами по выборке (квантили): ставки сортируются по линии и
+    делятся на ~LINE_GROUPS групп примерно равного размера; одинаковые линии не
+    разрезаются между группами. Так шкала подходит любой лиге/спорту (Prime ~250,
+    Pro ~160, хоккей ~10) без ручного шага. Линии разных лиг несопоставимы, поэтому
+    при нескольких лигах в выборке разбивку не строим — возвращаем подсказку.
+    Возвращает (строки, подсказка|None)."""
+    rows = []
+    for b in bets:
+        try:
+            ln = float(b["line"])
+        except (TypeError, ValueError):
+            continue
+        rows.append((ln, b))
+    if not rows:
+        return [], None                      # у рынка нет линии (1X2, обе забьют…)
+    if len({b["league"] for _, b in rows}) > 1:
+        return [], "Выберите одну лигу — линии разных лиг несопоставимы."
+    rows.sort(key=lambda t: t[0])
+    n_groups = max(1, min(LINE_GROUPS, len(rows) // LINE_GROUP_MIN))
+    target = math.ceil(len(rows) / n_groups)
+
+    groups, cur = [], []
+    i = 0
+    while i < len(rows):
+        j = i                                # берём все ставки с той же линией разом
+        while j < len(rows) and rows[j][0] == rows[i][0]:
+            j += 1
+        cur.extend(rows[i:j])
+        i = j
+        if len(cur) >= target and len(groups) < n_groups - 1:
+            groups.append(cur); cur = []
+    if cur:
+        # хвост меньше половины группы не показываем отдельно — приклеиваем к соседней
+        if groups and len(cur) < target / 2:
+            groups[-1].extend(cur)
+        else:
+            groups.append(cur)
+
+    out = []
+    for g in groups:
+        lo, hi = g[0][0], g[-1][0]
+        wins = sum(1 for _, b in g if b["result"] == WIN)
+        losses = sum(1 for _, b in g if b["result"] == LOSE)
+        profit = sum(b["profit"] for _, b in g)
+        turnover = len(g) * stake
+        out.append({
+            "range": f"{lo:g}" if lo == hi else f"{lo:g}–{hi:g}",
+            "matches": len({b["event_id"] for _, b in g}),
+            "wins": wins, "losses": losses,
+            "winrate": round(wins / (wins + losses) * 100, 1) if wins + losses else 0.0,
+            "profit": round(profit, 2),
+            "roi": round(profit / turnover * 100, 1) if turnover else 0.0,
+        })
+    return out, None
+
+
 # --- Метрики и кривая --------------------------------------------------------
 
 def _metrics(bets, stake, bank):
@@ -702,6 +767,8 @@ def _metrics(bets, stake, bank):
             cur_dd_days = (d - peak_day).days
             max_dd_days = max(max_dd_days, cur_dd_days)
 
+    line_list, line_note = _line_profit(bets, stake)
+
     return {
         "bets": n, "matches": len({b["event_id"] for b in bets}),
         "wins": wins, "losses": losses, "pushes": pushes,
@@ -723,6 +790,8 @@ def _metrics(bets, stake, bank):
         "hourly_profit": hourly_list,
         "monthly_profit": monthly_list,
         "odds_profit": odds_list,
+        "line_profit": line_list,
+        "line_profit_note": line_note,
     }
 
 
